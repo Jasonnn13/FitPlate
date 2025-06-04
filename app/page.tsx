@@ -1,20 +1,21 @@
 "use client"
 
 import { useState } from "react"
-import LoginPage from "../login-page"
-import RegisterPage from "../register-page"
-import OnboardingPage from "../onboarding-page"
-import HomePage from "../home-page"
-import RecipesPage from "../recipes-page"
-import PublicRecipesPage from "../public-recipes-page"
-import AddRecipePage from "../add-recipe-page"
-import RecipeDetailPage from "../recipe-detail-page"
-import IngredientsPage from "../ingredients-page"
-import IngredientDetailPage from "../ingredient-detail-page"
-import SettingsPage from "../settings-page"
-import AddConsumedMenuPage from "../add-consumed-menu-page"
-import PickRecipePage from "../pick-recipe-page"
-import SaveAsRecipePage from "../save-as-recipe-page"
+import LoginPage from "../pages/auth/login-page"
+import RegisterPage from "../pages/auth/register-page"
+import OnboardingPage from "../pages/onboarding-page"
+import HomePage from "../pages/home-page"
+import RecipesPage from "../pages/recipe/recipes-page"
+import PublicRecipesPage from "../pages/recipe/public-recipes-page"
+import AddRecipePage from "../pages/recipe/add-recipe-page"
+import RecipeDetailPage from "../pages/recipe/recipe-detail-page"
+import IngredientsPage from "../pages/ingredients/ingredients-page"
+import IngredientDetailPage from "../pages/ingredients/ingredient-detail-page"
+import SettingsPage from "../pages/settings-page"
+import AddConsumedMenuPage from "../pages/add-consumed-menu-page"
+import PickRecipePage from "../pages/recipe/pick-recipe-page"
+import SaveAsRecipePage from "../pages/recipe/save-as-recipe-page"
+import { toast } from "@/hooks/use-toast"
 
 export default function Page() {
   const [currentPage, setCurrentPage] = useState<
@@ -107,6 +108,11 @@ export default function Page() {
       <LoginPage
         onNavigateToRegister={() => setCurrentPage("register")}
         onNavigateToHome={() => setCurrentPage("home")}
+        onShowMessage={(message, type) => {
+          // Map "success" to "default" and "error" to "destructive"
+          const variant = type === "success" ? "default" : type === "error" ? "destructive" : undefined;
+          toast({ description: message, variant }); // Adjust according to your toast API
+        }}
       />
     )
   }
@@ -116,6 +122,11 @@ export default function Page() {
       <RegisterPage
         onNavigateToLogin={() => setCurrentPage("login")}
         onNavigateToOnboarding={() => setCurrentPage("onboarding")}
+        onShowMessage={(message, type) => {
+          // Map "success" to "default" and "error" to "destructive"
+          const variant = type === "success" ? "default" : type === "error" ? "destructive" : undefined;
+          toast({ description: message, variant }); // Adjust according to your toast API
+        }}
       />
     )
   }
