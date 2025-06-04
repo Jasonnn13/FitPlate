@@ -3,7 +3,7 @@ node_modules/
 .pnpm-debug.log
 
 # Next.js build output
-.next/
+.next
 out/
 
 # Env files
@@ -24,3 +24,5 @@ yarn-error.log*
 
 # Config folders
 /config/
+
+package-lock.json
