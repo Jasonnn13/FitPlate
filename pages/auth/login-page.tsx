@@ -25,33 +25,44 @@ export default function LoginPage({
   const flaskApiUrl = process.env.NEXT_PUBLIC_FLASK_API_URL || "http://localhost:5000"
 
   const handleLogin = async () => {
-    setIsLoading(true)
-    try {
-      const response = await fetch(`${flaskApiUrl}/api/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      })
+  setIsLoading(true);
+  try {
+    const response = await fetch(`${flaskApiUrl}/api/auth/login`, { // Make sure flaskApiUrl is defined
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, password }),
+    });
 
-      const data = await response.json()
+    const data = await response.json();
 
-      if (response.ok) {
-        onShowMessage(data.message || "Login successful!", 'success')
-        // Typically, you'd store the user data/token here (e.g., in context or Zustand/Redux)
-        // For now, just navigating with basic user data
-        onNavigateToHome(data.user)
-      } else {
-        onShowMessage(data.error || "Login failed. Please check your credentials.", 'error')
+    if (response.ok && data.token) { // Check if response is OK AND token exists
+      onShowMessage(data.message || "Login successful!", 'success');
+
+      // --- STORE THE TOKEN ---
+      localStorage.setItem('firebaseIdToken', data.token);
+
+      // --- Optionally store user data (useful for immediate UI updates) ---
+      if (data.user) {
+        localStorage.setItem('currentUser', JSON.stringify(data.user));
       }
-    } catch (error) {
-      console.error("Login error:", error)
-      onShowMessage("An error occurred during login. Please try again.", 'error')
-    } finally {
-      setIsLoading(false)
+
+      // Navigate to home with user data (or let home page fetch it using the token)
+      onNavigateToHome(data.user); // This is fine if onNavigateToHome can accept user data
+
+    } else {
+      // Handle cases where response is ok but no token, or response is not ok
+      const errorMessage = data.error || "Login failed. Please check your credentials or token missing.";
+      onShowMessage(errorMessage, 'error');
     }
+  } catch (error) {
+    console.error("Login error:", error);
+    onShowMessage("An error occurred during login. Please try again.", 'error');
+  } finally {
+    setIsLoading(false);
   }
+};
 
   const handleForgotPassword = async () => {
     if (!email) {

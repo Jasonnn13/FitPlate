@@ -12,7 +12,7 @@ import RecipeDetailPage from "../pages/recipe/recipe-detail-page"
 import IngredientsPage from "../pages/ingredients/ingredients-page"
 import IngredientDetailPage from "../pages/ingredients/ingredient-detail-page"
 import SettingsPage from "../pages/settings-page"
-import AddConsumedMenuPage from "../pages/add-consumed-menu-page"
+import AddConsumedMenuPage from "../pages/consumedMenu/add-consumed-menu-page"
 import PickRecipePage from "../pages/recipe/pick-recipe-page"
 import SaveAsRecipePage from "../pages/recipe/save-as-recipe-page"
 import { toast } from "@/hooks/use-toast"
@@ -297,17 +297,17 @@ export default function Page() {
       <AddRecipePage
         onNavigateBack={() => {
           if (consumedMealData) {
-            setCurrentPage("saveAsRecipe")
+            setCurrentPage("saveAsRecipe"); // Or perhaps back to a meal detail page
           } else {
-            setCurrentPage("recipes")
+            setCurrentPage("recipes");
           }
         }}
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToRecipes={() => setCurrentPage("recipes")}
         onNavigateToIngredients={() => {
-          setIsIngredientSelectionMode(true)
-          setIngredientSelectionContext("recipe")
-          setCurrentPage("ingredients")
+          setIsIngredientSelectionMode(true);
+          setIngredientSelectionContext("recipe");
+          setCurrentPage("ingredients");
         }}
         prefilledData={consumedMealData}
         selectedIngredients={recipeIngredients}

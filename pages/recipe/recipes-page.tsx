@@ -1,145 +1,232 @@
 "use client"
 
-import { Search, Filter, Star, Book, Home, Plus, ChevronLeft, User } from "lucide-react"
+import { Search, Filter, Star, Book, Home, Plus, ChevronLeft, User, Image as ImageIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import Image from "next/image"
-import { useState } from "react"
+// Removed: import Image from "next/image" 
+import { useState, useEffect, useMemo, useCallback } from "react"
+
+interface Recipe {
+  id: string; // Should be string if coming from Firestore
+  name: string;
+  calories?: string; // Or caloriesPer100g: number;
+  caloriesPer100g?: number;
+  isFavorite: boolean;
+  category?: string; // Make sure this is in your Firebase data for recipes
+  image?: string; // Cloudinary link
+}
 
 interface RecipesPageProps {
-  onNavigateToPublic?: () => void
-  onNavigateToHome: () => void
-  onNavigateToAdd: () => void
-  onNavigateToDetail?: () => void
-  onNavigateToAddRecipe?: () => void
-  onNavigateToSettings: () => void
+  onNavigateToPublic?: () => void;
+  onNavigateToHome: () => void;
+  onNavigateToAdd: () => void; // For adding consumed food
+  onNavigateToDetail?: (recipeId: string) => void; // Pass recipeId
+  onNavigateToAddRecipe?: () => void; // For creating a new recipe
+  onNavigateToSettings: () => void;
 }
+
+const flaskApiUrl = (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_API_BASE_URL) 
+                    || "http://localhost:5000";
 
 export default function RecipesPage({
   onNavigateToPublic,
   onNavigateToHome,
-  onNavigateToAdd,
+  onNavigateToAdd, // This is for adding consumed menu, not creating a recipe
   onNavigateToDetail,
-  onNavigateToAddRecipe,
+  onNavigateToAddRecipe, // This is for navigating to a page to create a new recipe
   onNavigateToSettings,
 }: RecipesPageProps) {
-  const [recipes, setRecipes] = useState([
-    {
-      id: 1,
-      name: "Fried Chicken",
-      calories: "~269 Calories/100g",
-      isFavorite: true,
-      category: "Dinner",
-      image: "/placeholder.svg?height=120&width=120",
-    },
-    {
-      id: 2,
-      name: "Grilled Salmon",
-      calories: "~206 Calories/100g",
-      isFavorite: false,
-      category: "Lunch",
-      image: "/placeholder.svg?height=120&width=120",
-    },
-    {
-      id: 3,
-      name: "Caesar Salad",
-      calories: "~163 Calories/100g",
-      isFavorite: false,
-      category: "Lunch",
-      image: "/placeholder.svg?height=120&width=120",
-    },
-    {
-      id: 4,
-      name: "Avocado Toast",
-      calories: "~190 Calories/slice",
-      isFavorite: true,
-      category: "Breakfast",
-      image: "/placeholder.svg?height=120&width=120",
-    },
-    {
-      id: 5,
-      name: "Beef Stir Fry",
-      calories: "~250 Calories/100g",
-      isFavorite: false,
-      category: "Dinner",
-      image: "/placeholder.svg?height=120&width=120",
-    },
-    {
-      id: 6,
-      name: "Vegetable Soup",
-      calories: "~120 Calories/100g",
-      isFavorite: false,
-      category: "Lunch",
-      image: "/placeholder.svg?height=120&width=120",
-    },
-  ])
+  const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeFilter, setActiveFilter] = useState("All");
+  
+  // Derive unique categories from recipes for filters
+  const categories = useMemo(() => {
+    const uniqueCategories = new Set(allRecipes.map(r => r.category).filter(Boolean) as string[]);
+    return ["All", "Favorites", ...Array.from(uniqueCategories)];
+  }, [allRecipes]);
 
-  const [activeFilter, setActiveFilter] = useState("All")
-  const filters = ["All", "Favorites", "Breakfast", "Lunch", "Dinner"]
 
-  const toggleFavorite = (id: number) => {
-    setRecipes(recipes.map((recipe) => (recipe.id === id ? { ...recipe, isFavorite: !recipe.isFavorite } : recipe)))
+  const fetchRecipes = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    const token = localStorage.getItem('firebaseIdToken');
+
+    if (!token) {
+      setError("Authentication required. Please log in.");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${flaskApiUrl}/api/recipes/my-recipes`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: "Failed to parse error response" }));
+         if (response.status === 401) {
+          localStorage.removeItem('firebaseIdToken');
+          localStorage.removeItem('currentUser');
+          setError("Session expired. Please log in again.");
+        } else {
+          setError(errorData.error || `Error: ${response.status}`);
+        }
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const data: Recipe[] = await response.json();
+      // Format calories string if needed, or ensure backend sends it as desired
+      const formattedData = data.map(recipe => ({
+        ...recipe,
+        calories: recipe.caloriesPer100g ? `~${recipe.caloriesPer100g} Cal/100g` : recipe.calories || "N/A",
+      }));
+      setAllRecipes(formattedData);
+    } catch (err) {
+      console.error("Failed to fetch recipes:", err);
+       if (!error) { // Only set error if not already set by a specific condition (like 401)
+        setError(err instanceof Error ? err.message : "Failed to load recipes.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, []); // Removed 'error' from dependencies to prevent potential infinite loops
+
+  useEffect(() => {
+    fetchRecipes();
+  }, [fetchRecipes]);
+
+  const toggleFavorite = async (recipeId: string) => {
+    const token = localStorage.getItem('firebaseIdToken');
+    if (!token) {
+      setError("Authentication required to update favorites.");
+      return;
+    }
+
+    // Optimistic update
+    const originalRecipes = [...allRecipes];
+    setAllRecipes(prevRecipes =>
+      prevRecipes.map(recipe =>
+        recipe.id === recipeId ? { ...recipe, isFavorite: !recipe.isFavorite } : recipe
+      )
+    );
+
+    try {
+      const response = await fetch(`${flaskApiUrl}/api/recipes/toggle-favorite`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recipeId }),
+      });
+
+      if (!response.ok) {
+        // Revert optimistic update on failure
+        setAllRecipes(originalRecipes);
+        const errorData = await response.json().catch(() => ({ error: "Failed to parse error" }));
+        setError(errorData.error || "Failed to update favorite status.");
+        throw new Error(errorData.error || "Failed to update favorite");
+      }
+      // const result = await response.json(); // Contains { isFavorite: boolean }
+      // Optionally, re-fetch or update based on result if optimistic update is not precise enough
+      // For now, optimistic update is fine.
+      
+    } catch (err) {
+      setAllRecipes(originalRecipes); // Revert on network error
+      setError(err instanceof Error ? err.message : "Error updating favorite.");
+      console.error("Toggle favorite error:", err);
+    }
+  };
+
+  const filteredRecipes = useMemo(() => {
+    return allRecipes.filter(recipe => {
+      const matchesSearch = recipe.name.toLowerCase().includes(searchTerm.toLowerCase());
+      if (!matchesSearch) return false;
+
+      if (activeFilter === "All") return true;
+      if (activeFilter === "Favorites") return recipe.isFavorite;
+      return recipe.category === activeFilter;
+    });
+  }, [allRecipes, searchTerm, activeFilter]);
+
+  if (isLoading) {
+    return <div className="max-w-sm mx-auto bg-white dark:bg-gray-900 min-h-screen flex items-center justify-center"><p className="text-gray-700 dark:text-gray-300">Loading recipes...</p></div>;
   }
 
-  const filteredRecipes =
-    activeFilter === "All"
-      ? recipes
-      : activeFilter === "Favorites"
-        ? recipes.filter((recipe) => recipe.isFavorite)
-        : recipes.filter((recipe) => recipe.category === activeFilter)
+  if (error) {
+    return (
+      <div className="max-w-sm mx-auto bg-white dark:bg-gray-900 min-h-screen flex flex-col items-center justify-center p-6 text-center">
+        <p className="text-red-500 dark:text-red-400 text-lg mb-4">Error</p>
+        <p className="text-gray-700 dark:text-gray-300 mb-6">{error}</p>
+        <Button onClick={fetchRecipes} className="bg-blue-500 hover:bg-blue-600 text-white">Try Again</Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-sm mx-auto bg-[#ffffff] min-h-screen">
+    <div className="max-w-sm mx-auto bg-white dark:bg-gray-800 min-h-screen text-gray-900 dark:text-white">
       {/* Header */}
-      <div className="px-4 pt-6 pb-4 sticky top-0 bg-white z-10">
+      <div className="px-4 pt-6 pb-4 sticky top-0 bg-white dark:bg-gray-800 z-20 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center">
-            <Button variant="ghost" size="icon" className="mr-2">
+            <Button variant="ghost" size="icon" className="mr-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" onClick={onNavigateToHome}>
               <ChevronLeft className="h-5 w-5" />
             </Button>
             <h1 className="text-xl font-bold">My Recipes</h1>
           </div>
           <button
             onClick={onNavigateToSettings}
-            className="w-10 h-10 bg-[#000000] rounded-full flex items-center justify-center hover:bg-[#2c2c2c] transition-colors"
+            className="w-10 h-10 bg-gray-800 dark:bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors"
           >
-            <User className="w-5 h-5 text-[#ffffff]" />
+            <User className="w-5 h-5 text-white" />
           </button>
         </div>
 
-        {/* Search */}
         <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#999999]" />
-          <Input placeholder="Search my recipes..." className="pl-10 pr-10 bg-[#f5f5f5] border-none rounded-lg" />
-          <Filter className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#999999]" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+          <Input 
+            placeholder="Search my recipes..." 
+            className="pl-10 pr-4 bg-gray-100 dark:bg-gray-700 border-transparent focus:border-blue-500 dark:focus:border-blue-400 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {/* Filter icon can be used to open a modal for more advanced filters if needed */}
+          {/* <Filter className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" /> */}
         </div>
 
-        {/* Action Buttons */}
         <div className="flex gap-3 mb-4">
           <Button
             onClick={onNavigateToPublic}
-            className="flex-1 bg-[#007aff] hover:bg-[#0056b3] text-white rounded-lg py-3"
+            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-3"
           >
-            <Star className="w-4 h-4 mr-2" />
-            Browse Recipes
+            <Book className="w-4 h-4 mr-2" /> {/* Changed icon */}
+            Browse Public
           </Button>
           <Button
             onClick={onNavigateToAddRecipe}
-            className="flex-1 bg-[#2c2c2c] hover:bg-[#1d1b20] text-white rounded-lg py-3"
+            className="flex-1 bg-gray-800 hover:bg-gray-700 dark:bg-green-600 dark:hover:bg-green-700 text-white rounded-lg py-3"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add New Recipe
           </Button>
         </div>
 
-        {/* Filters */}
         <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-          {filters.map((filter) => (
+          {categories.map((filter) => (
             <Button
               key={filter}
               variant={activeFilter === filter ? "default" : "outline"}
-              className={`rounded-full px-4 py-1 text-sm ${
-                activeFilter === filter ? "bg-[#000000] text-white" : "bg-white text-[#000000] border-[#e5e5e5]"
+              className={`rounded-full px-4 py-1 text-sm whitespace-nowrap ${
+                activeFilter === filter 
+                ? "bg-gray-900 dark:bg-blue-500 text-white" 
+                : "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600"
               }`}
               onClick={() => setActiveFilter(filter)}
             >
@@ -150,61 +237,78 @@ export default function RecipesPage({
       </div>
 
       {/* Recipe Grid */}
-      <div className="px-4 pb-20">
-        <div className="grid grid-cols-2 gap-4">
-          {filteredRecipes.map((recipe) => (
-            <div key={recipe.id} className="bg-[#f5f5f5] rounded-2xl p-4 flex flex-col">
-              <div className="w-full h-32 bg-[#e3e5c1] rounded-xl mb-3 overflow-hidden">
-                <Image
-                  src={recipe.image || "/placeholder.svg"}
-                  alt={recipe.name}
-                  width={120}
-                  height={120}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <h4 className="font-bold text-[#000000] mb-1">{recipe.name}</h4>
-              <p className="text-[#787880] text-sm mb-3">{recipe.calories}</p>
+      <div className="px-4 pb-24 pt-4"> {/* Added pt-4 */}
+        {filteredRecipes.length > 0 ? (
+          <div className="grid grid-cols-2 gap-4">
+            {filteredRecipes.map((recipe) => (
+              <div key={recipe.id} className="bg-gray-100 dark:bg-gray-700 rounded-2xl p-3 flex flex-col shadow-md">
+                <div className="w-full h-32 rounded-xl mb-3 overflow-hidden relative bg-gray-300 dark:bg-gray-600">
+                  {recipe.image ? (
+                    <img
+                      src={recipe.image} // Cloudinary link
+                      alt={recipe.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => (e.currentTarget.style.display = 'none')} // Basic error handling
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+                        <ImageIcon size={40}/>
+                    </div>
+                  )}
+                </div>
+                <h4 className="font-semibold text-md truncate mb-1" title={recipe.name}>{recipe.name}</h4>
+                <p className="text-gray-600 dark:text-gray-400 text-xs mb-3">{recipe.calories}</p>
 
-              <div className="mt-auto flex justify-between items-center">
-                <Button
-                  className="bg-[#2c2c2c] hover:bg-[#1d1b20] text-[#ffffff] rounded-lg py-1 px-3 text-xs"
-                  onClick={onNavigateToDetail}
-                >
-                  <Book className="w-3 h-3 mr-1" />
-                  View
-                </Button>
-
-                <button
-                  onClick={() => toggleFavorite(recipe.id)}
-                  className="flex justify-center"
-                  aria-label={recipe.isFavorite ? "Remove from favorites" : "Add to favorites"}
-                >
-                  <Star className={`w-5 h-5 ${recipe.isFavorite ? "text-[#007aff] fill-current" : "text-[#999999]"}`} />
-                </button>
+                <div className="mt-auto flex justify-between items-center pt-2 border-t border-gray-200 dark:border-gray-600">
+                  <Button
+                    size="sm"
+                    className="bg-gray-700 hover:bg-gray-600 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-lg py-1 px-3 text-xs"
+                    onClick={() => onNavigateToDetail && onNavigateToDetail(recipe.id)}
+                  >
+                    <Book className="w-3 h-3 mr-1" />
+                    View
+                  </Button>
+                  <button
+                    onClick={() => toggleFavorite(recipe.id)}
+                    className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
+                    aria-label={recipe.isFavorite ? "Remove from favorites" : "Add to favorites"}
+                  >
+                    <Star className={`w-5 h-5 transition-colors ${recipe.isFavorite ? "text-yellow-400 fill-yellow-400" : "text-gray-400 dark:text-gray-500 hover:text-yellow-300"}`} />
+                  </button>
+                </div>
               </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-center text-gray-500 dark:text-gray-400 py-10">
+            No recipes found matching your criteria.
+          </p>
+        )}
+      </div>
+
+      {/* Bottom Navigation */}
+      <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-sm bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 z-10">
+        <div className="flex justify-around py-2">
+          {[
+            { label: "Home", icon: Home, action: onNavigateToHome, active: false },
+            { label: "Add Food", icon: Plus, action: onNavigateToAdd, active: false }, // Changed label for clarity
+            { label: "Recipes", icon: Book, action: () => {}, active: true }, // Current page
+          ].map((item) => (
+             <div 
+                key={item.label} 
+                className={`flex flex-col items-center py-2 px-3 rounded-md cursor-pointer transition-colors ${
+                    item.active 
+                    ? "text-blue-600 dark:text-blue-400" 
+                    : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                }`}
+                onClick={item.action}
+            >
+              <item.icon className={`w-6 h-6 mb-1 ${item.active ? "text-blue-600 dark:text-blue-400" : ""}`} />
+              <span className={`text-xs font-medium ${item.active ? "text-blue-600 dark:text-blue-400" : ""}`}>{item.label}</span>
             </div>
           ))}
         </div>
       </div>
-
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-sm bg-[#ffffff] border-t border-[#f5f5f5]">
-        <div className="flex justify-around py-2">
-          <div className="flex flex-col items-center py-2" onClick={onNavigateToHome}>
-            <Home className="w-6 h-6 text-[#999999] mb-1" />
-            <span className="text-xs text-[#999999]">Home</span>
-          </div>
-          <div className="flex flex-col items-center py-2" onClick={onNavigateToAdd}>
-            <Plus className="w-6 h-6 text-[#999999] mb-1" />
-            <span className="text-xs text-[#999999]">Add</span>
-          </div>
-          <div className="flex flex-col items-center py-2">
-            <Book className="w-6 h-6 text-[#007aff] fill-current mb-1" />
-            <span className="text-xs text-[#007aff] font-medium">Recipes</span>
-          </div>
-        </div>
-      </div>
     </div>
-  )
+  );
 }
