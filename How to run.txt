@@ -1,0 +1,6 @@
+Open cmd in this folder then type
+npm run dev
+
+If fail
+npm install 
+npm audit fix --force
