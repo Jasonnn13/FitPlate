@@ -110,7 +110,7 @@ export default function Page() {
   }
 
   if (currentPage === "onboarding") {
-    return <OnboardingPage onComplete={() => setCurrentPage("home")} />
+    return <OnboardingPage onComplete={() => setCurrentPage("login")} />
   }
 
   // Settings page
