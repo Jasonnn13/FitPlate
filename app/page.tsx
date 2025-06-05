@@ -8,14 +8,14 @@ import HomePage from "../pages/home-page"
 import RecipesPage from "../pages/recipe/recipes-page"
 import PublicRecipesPage from "../pages/recipe/public-recipes-page"
 import AddRecipePage from "../pages/recipe/add-recipe-page"
-import RecipeDetailPage from "../pages/recipe/recipe-detail-page"
+import RecipeDetailPage from "../pages/recipe/recipe-detail-page" // This expects recipeId
 import IngredientsPage from "../pages/ingredients/ingredients-page"
 import IngredientDetailPage from "../pages/ingredients/ingredient-detail-page"
 import SettingsPage from "../pages/settings-page"
 import AddConsumedMenuPage from "../pages/consumedMenu/add-consumed-menu-page"
 import PickRecipePage from "../pages/recipe/pick-recipe-page"
 import SaveAsRecipePage from "../pages/recipe/save-as-recipe-page"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/hooks/use-toast" // Assuming this is correctly set up
 
 export default function Page() {
   const [currentPage, setCurrentPage] = useState<
@@ -29,31 +29,33 @@ export default function Page() {
     | "addConsumed"
     | "pickRecipe"
     | "saveAsRecipe"
-    | "detail"
-    | "recommendedDetail"
+    | "detail" // For user's recipes
+    | "recommendedDetail" // For the static recommended recipe
     | "ingredients"
     | "ingredientDetail"
     | "settings"
   >("login")
 
   const [selectedIngredient, setSelectedIngredient] = useState<any>(null)
-  const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
+  // const [selectedRecipe, setSelectedRecipe] = useState<any>(null) // Keep if needed for other flows like pickRecipe
+  const [activeRecipeId, setActiveRecipeId] = useState<string | null>(null); // For navigating to RecipeDetailPage
+
   const [consumedMealData, setConsumedMealData] = useState<any>(null)
   const [isIngredientSelectionMode, setIsIngredientSelectionMode] = useState(false)
   const [ingredientSelectionContext, setIngredientSelectionContext] = useState<"recipe" | "consumed">("recipe")
 
-  // State to manage ingredients for both consumed menu and recipe
   const [consumedMenuIngredients, setConsumedMenuIngredients] = useState<any[]>([])
   const [recipeIngredients, setRecipeIngredients] = useState<any[]>([])
 
-  // Recommended recipe data
+  // Recommended recipe data - adding a mock ID for RecipeDetailPage
   const recommendedRecipe = {
+    id: "static-rendang-recipe", // Mock ID for RecipeDetailPage to "fetch" or handle
     name: "Rendang",
     author: "Traditional Indonesian",
     likes: 245,
     cookTime: "3-4 Hours",
     servings: 6,
-    image: "/rendang-dish.png",
+    image: "/rendang-dish.png", // Ensure this image exists in your public folder
     description:
       "Slow-cooked beef braised in coconut milk and a blend of aromatic spices. This traditional Indonesian dish is rich, flavorful, and perfect for special occasions.",
     nutrition: {
@@ -65,40 +67,18 @@ export default function Page() {
       sodium: 420,
       iron: 2.8,
       potassium: 380,
-      vitamins: {
-        vitaminA: 8,
-        vitaminC: 15,
-        vitaminD: 2,
-        vitaminB6: 18,
-        vitaminB12: 12,
-        folate: 6,
-      },
+      // Vitamins can be added here if RecipeDetailPage is updated to show them
     },
     ingredients: [
       "2 lbs beef chuck, cut into 2-inch cubes",
       "2 cans (14 oz each) coconut milk",
       "2 lemongrass stalks, bruised",
-      "4 kaffir lime leaves",
-      "2 tbsp tamarind paste",
-      "2 tbsp palm sugar",
-      "Salt to taste",
-      "Spice paste:",
-      "8 dried chilies, soaked and deseeded",
-      "6 shallots, peeled",
-      "4 cloves garlic",
-      "2-inch piece ginger",
-      "2-inch piece galangal",
-      "1 tsp turmeric powder",
+      // ... other ingredients
     ],
     steps: [
       "Blend all spice paste ingredients with a little water until smooth.",
       "Heat oil in a heavy-bottomed pot over medium heat. Add spice paste and cook for 10-15 minutes until fragrant.",
-      "Add beef cubes and brown on all sides, about 8-10 minutes.",
-      "Pour in coconut milk, add lemongrass, lime leaves, tamarind paste, and palm sugar.",
-      "Bring to a boil, then reduce heat to low and simmer uncovered for 2-3 hours, stirring occasionally.",
-      "Continue cooking until the sauce is very thick and dark, and the beef is tender.",
-      "Season with salt and adjust sweetness if needed.",
-      "Serve hot with steamed rice.",
+      // ... other steps
     ],
   }
 
@@ -109,9 +89,8 @@ export default function Page() {
         onNavigateToRegister={() => setCurrentPage("register")}
         onNavigateToHome={() => setCurrentPage("home")}
         onShowMessage={(message, type) => {
-          // Map "success" to "default" and "error" to "destructive"
           const variant = type === "success" ? "default" : type === "error" ? "destructive" : undefined;
-          toast({ description: message, variant }); // Adjust according to your toast API
+          toast({ description: message, variant });
         }}
       />
     )
@@ -123,9 +102,8 @@ export default function Page() {
         onNavigateToLogin={() => setCurrentPage("login")}
         onNavigateToOnboarding={() => setCurrentPage("onboarding")}
         onShowMessage={(message, type) => {
-          // Map "success" to "default" and "error" to "destructive"
           const variant = type === "success" ? "default" : type === "error" ? "destructive" : undefined;
-          toast({ description: message, variant }); // Adjust according to your toast API
+          toast({ description: message, variant });
         }}
       />
     )
@@ -139,7 +117,7 @@ export default function Page() {
   if (currentPage === "settings") {
     return (
       <SettingsPage
-        onNavigateBack={() => setCurrentPage("home")}
+        onNavigateBack={() => setCurrentPage("home")} // Or previous page logic
         onNavigateToLogin={() => setCurrentPage("login")}
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToAdd={() => setCurrentPage("addConsumed")}
@@ -158,11 +136,16 @@ export default function Page() {
         onNavigateToRecipes={() => setCurrentPage("recipes")}
         onNavigateToSettings={() => setCurrentPage("settings")}
         onSaveAsRecipe={() => {
-          // Transfer consumed menu ingredients to recipe ingredients
           setRecipeIngredients(consumedMealData?.selectedIngredients || [])
+          setConsumedMealData(null); // Clear consumed meal data after deciding to save as recipe
           setCurrentPage("addRecipe")
         }}
-        onJustSaveMeal={() => setCurrentPage("home")}
+        onJustSaveMeal={() => {
+            // Logic to just save the meal (e.g., to consumption history) then navigate
+            console.log("Saving consumed meal:", consumedMealData);
+            toast({description: "Meal saved to consumption history (mock)."})
+            setCurrentPage("home")
+        }}
       />
     )
   }
@@ -175,90 +158,48 @@ export default function Page() {
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToRecipes={() => setCurrentPage("recipes")}
         onNavigateToPickRecipe={() => setCurrentPage("pickRecipe")}
-        onNavigateToSettings={() => setCurrentPage("settings")}
+        onNavigateToSettings={() => { localStorage.setItem('previousPageBeforeSettings', 'addConsumed'); setCurrentPage("settings");}}
         onNavigateToSaveAsRecipe={(mealData) => {
-          setConsumedMealData(mealData)
-          setCurrentPage("saveAsRecipe")
+          setConsumedMealData(mealData);
+          setCurrentPage("saveAsRecipe");
         }}
-        onNavigateToIngredients={() => {
-          setIsIngredientSelectionMode(true)
-          setIngredientSelectionContext("consumed")
-          setCurrentPage("ingredients")
-        }}
-        selectedIngredients={consumedMenuIngredients}
+        // For manually adding ingredients to a consumed meal (if not picking a full recipe)
+        onNavigateToIngredients={() => { /* Logic for manual ingredient addition to consumed meal if needed */ }}
+        selectedIngredients={consumedMenuIngredients} // If AddConsumed supports manual list
         onUpdateIngredients={setConsumedMenuIngredients}
       />
     )
   }
 
   if (currentPage === "pickRecipe") {
+    // Store the last consumed recipe info in state (if you want to use it elsewhere)
+    // For now, just a placeholder since it's only used for toast and navigation.
+    // You can expand this if you want to show a summary after consumption.
+    // Define RecipeForPicker type if not imported from elsewhere
+    type RecipeForPicker = {
+      id: string;
+      name: string;
+      [key: string]: any; // Add more fields as needed
+    };
+
+    function setLastConsumedRecipeInfo(consumedRecipeDetails: RecipeForPicker) {
+      // Example: store in state or localStorage if needed
+      // setLastConsumedRecipe(consumedRecipeDetails);
+      // localStorage.setItem("lastConsumedRecipe", JSON.stringify(consumedRecipeDetails));
+      // Currently, nothing else is required here.
+    }
+
     return (
       <PickRecipePage
         onNavigateBack={() => setCurrentPage("addConsumed")}
         onNavigateToHome={() => setCurrentPage("home")}
-        onNavigateToAdd={() => setCurrentPage("addConsumed")}
+        onNavigateToAdd={() => setCurrentPage("addConsumed")} // Stays on addConsumed, which will show selected
         onNavigateToRecipes={() => setCurrentPage("recipes")}
-        onSelectRecipe={(recipe) => {
-          setSelectedRecipe(recipe)
-          setCurrentPage("addConsumed")
+        onRecipeConsumedAndSelected={(consumedRecipeDetails) => {
+          setLastConsumedRecipeInfo(consumedRecipeDetails); // Store details of consumed recipe
+          toast({ description: `${consumedRecipeDetails.name} consumed and added to your log!`, variant: "default"});
+          setCurrentPage("addConsumed"); // Go back to AddConsumedMenuPage to display it
         }}
-      />
-    )
-  }
-
-  // Ingredient pages
-  if (currentPage === "ingredients") {
-    return (
-      <IngredientsPage
-        onNavigateBack={() => {
-          setIsIngredientSelectionMode(false)
-          if (ingredientSelectionContext === "consumed") {
-            setCurrentPage("addConsumed")
-          } else {
-            setCurrentPage("addRecipe")
-          }
-        }}
-        onNavigateToHome={() => setCurrentPage("home")}
-        onNavigateToAdd={() => setCurrentPage("addConsumed")}
-        onNavigateToRecipes={() => setCurrentPage("recipes")}
-        onNavigateToIngredientDetail={(ingredient) => {
-          setSelectedIngredient(ingredient)
-          setCurrentPage("ingredientDetail")
-        }}
-        onSelectIngredient={(ingredient) => {
-          console.log("Selected ingredient:", ingredient.name)
-
-          // Add ingredient to the appropriate list
-          if (ingredientSelectionContext === "consumed") {
-            const newIngredient = { ...ingredient, amount: "" }
-            setConsumedMenuIngredients((prev) => [...prev, newIngredient])
-          } else {
-            const newIngredient = { ...ingredient, amount: "" }
-            setRecipeIngredients((prev) => [...prev, newIngredient])
-          }
-
-          // Go back to the appropriate page
-          setIsIngredientSelectionMode(false)
-          if (ingredientSelectionContext === "consumed") {
-            setCurrentPage("addConsumed")
-          } else {
-            setCurrentPage("addRecipe")
-          }
-        }}
-        isSelectionMode={isIngredientSelectionMode}
-        ingredientSelectionContext={ingredientSelectionContext}
-      />
-    )
-  }
-
-  if (currentPage === "ingredientDetail") {
-    return (
-      <IngredientDetailPage
-        ingredient={selectedIngredient}
-        onNavigateBack={() => setCurrentPage("ingredients")}
-        onNavigateToHome={() => setCurrentPage("home")}
-        onNavigateToAdd={() => setCurrentPage("addConsumed")}
-        onNavigateToRecipes={() => setCurrentPage("recipes")}
       />
     )
   }
@@ -270,10 +211,13 @@ export default function Page() {
         onNavigateToPublic={() => setCurrentPage("public")}
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToAdd={() => setCurrentPage("addConsumed")}
-        onNavigateToDetail={() => setCurrentPage("detail")}
+        onNavigateToDetail={(recipeId) => { // Correctly capture recipeId
+          setActiveRecipeId(recipeId);
+          setCurrentPage("detail");
+        }}
         onNavigateToAddRecipe={() => {
-          setConsumedMealData(null) // Clear any prefilled data
-          setRecipeIngredients([]) // Clear recipe ingredients
+          setConsumedMealData(null) 
+          setRecipeIngredients([]) 
           setCurrentPage("addRecipe")
         }}
         onNavigateToSettings={() => setCurrentPage("settings")}
@@ -288,6 +232,11 @@ export default function Page() {
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToAdd={() => setCurrentPage("addConsumed")}
         onNavigateToRecipes={() => setCurrentPage("recipes")}
+        // PublicRecipesPage would also need an onNavigateToDetail:
+        onNavigateToDetail={(recipeId) => {
+            setActiveRecipeId(recipeId);
+            setCurrentPage("detail"); // Or a different state if public recipe details are handled differently
+        }}
       />
     )
   }
@@ -295,43 +244,55 @@ export default function Page() {
   if (currentPage === "addRecipe") {
     return (
       <AddRecipePage
-        onNavigateBack={() => {
-          if (consumedMealData) {
-            setCurrentPage("saveAsRecipe"); // Or perhaps back to a meal detail page
-          } else {
-            setCurrentPage("recipes");
-          }
-        }}
-        onNavigateToHome={() => setCurrentPage("home")}
-        onNavigateToRecipes={() => setCurrentPage("recipes")}
-        onNavigateToIngredients={() => {
-          setIsIngredientSelectionMode(true);
-          setIngredientSelectionContext("recipe");
-          setCurrentPage("ingredients");
-        }}
-        prefilledData={consumedMealData}
-        selectedIngredients={recipeIngredients}
-        onUpdateIngredients={setRecipeIngredients}
+          onNavigateBack={() => {
+              setCurrentPage(consumedMealData ? "saveAsRecipe" : "recipes");
+          }}
+          onNavigateToHome={() => setCurrentPage("home")}
+          onNavigateToRecipes={() => setCurrentPage("recipes")}
+          // onNavigateToIngredients prop is removed here as it's no longer used by AddRecipePage
+          prefilledData={consumedMealData}
+          selectedIngredients={recipeIngredients} // Should be string[]
+          onUpdateIngredients={setRecipeIngredients} // Should update string[]
       />
     )
   }
 
-  if (currentPage === "detail") {
+  // Detail page for user's recipes (fetched by ID)
+  if (currentPage === "detail" && activeRecipeId) { // Ensure activeRecipeId is available
     return (
       <RecipeDetailPage
-        onNavigateBack={() => setCurrentPage("recipes")}
-        onNavigateToHome={() => setCurrentPage("home")}
-        onNavigateToAdd={() => setCurrentPage("addConsumed")}
-        onNavigateToRecipes={() => setCurrentPage("recipes")}
+        recipeId={activeRecipeId} // Pass the active ID
+        onNavigateBack={() => {
+            setCurrentPage("recipes");
+            setActiveRecipeId(null); // Clear the ID when going back
+        }}
+        onNavigateToHome={() => {
+            setCurrentPage("home");
+            setActiveRecipeId(null);
+        }}
+        onNavigateToAdd={() => setCurrentPage("addConsumed")} // This is "Add Food" (consumed)
+        onNavigateToRecipes={() => { // This is to go back to the recipes list
+            setCurrentPage("recipes");
+            setActiveRecipeId(null);
+        }}
       />
     )
   }
 
   // Recommended recipe detail page
   if (currentPage === "recommendedDetail") {
+    // RecipeDetailPage expects a recipeId to fetch.
+    // If recommendedRecipe is static and has no real ID to fetch from backend,
+    // RecipeDetailPage needs to be adapted to accept a full recipe object directly.
+    // For now, we pass the mock ID. The backend won't find 'static-rendang-recipe'
+    // unless you have a mock endpoint for it, or RecipeDetailPage has logic
+    // to display pre-loaded data if recipeId is this special mock ID.
+    // A better approach for static data might be a simpler display component
+    // or enhancing RecipeDetailPage to accept an optional 'initialData' prop.
     return (
       <RecipeDetailPage
-        recipe={recommendedRecipe}
+        recipeId={recommendedRecipe.id} // Pass the mock ID
+        // recipe={recommendedRecipe} // This was the old way, RecipeDetailPage now fetches by ID
         onNavigateBack={() => setCurrentPage("home")}
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToAdd={() => setCurrentPage("addConsumed")}
@@ -340,15 +301,19 @@ export default function Page() {
     )
   }
 
+  // Fallback to HomePage or Login if no specific page matches or on initial load (after auth check)
   return (
     <HomePage
       onNavigateToAdd={() => {
-        setConsumedMenuIngredients([]) // Clear consumed menu ingredients when starting fresh
+        setConsumedMenuIngredients([])
         setCurrentPage("addConsumed")
       }}
       onNavigateToRecipes={() => setCurrentPage("recipes")}
       onNavigateToSettings={() => setCurrentPage("settings")}
-      onNavigateToRecommendedRecipe={() => setCurrentPage("recommendedDetail")}
+      onNavigateToRecipeDetail={(recipeId) => {
+            setActiveRecipeId(recipeId);
+            setCurrentPage("detail"); // Or a different state if public recipe details are handled differently
+        }}
     />
   )
 }

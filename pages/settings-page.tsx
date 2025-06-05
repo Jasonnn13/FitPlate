@@ -65,7 +65,7 @@ export default function SettingsPage({
     }
 
     try {
-      const response = await fetch(`${flaskApiUrl}/api/user/profile`, {
+      const response = await fetch(`${flaskApiUrl}/api/user/home`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

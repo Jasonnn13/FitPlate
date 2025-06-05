@@ -1,6 +1,6 @@
 import os
 from functools import wraps
-from datetime import datetime, timedelta 
+from datetime import datetime, timedelta, date 
 import uuid 
 import json # For parsing JSON string from FormData
 
@@ -129,99 +129,119 @@ def firebase_auth_required(f):
     return decorated_function
 
 # --- Helper Functions ---
+
+def get_float_from_data(data_dict, key, default=0.0):
+    """Safely get a float value from a dictionary, handling None or non-numeric."""
+    val = data_dict.get(key)
+    if val is None: return default
+    try: return float(val)
+    except (ValueError, TypeError): 
+        app.logger.warning(f"Invalid numeric value for '{key}': {val} in data. Defaulting to {default}.")
+        return default
+
+def get_author_display_name(author_uid):
+    """
+    Fetches the display name of a user from Firestore given their UID.
+    Returns the display name or a default string if not found.
+    """
+    if not db:
+        app.logger.warning(f"Firestore not available, cannot fetch display name for UID {author_uid}")
+        return "Unknown Author"
+    try:
+        user_profile = get_user_profile_and_ensure_daily_reset(author_uid)
+        if user_profile and user_profile.get("displayName"):
+            return user_profile.get("displayName")
+        elif user_profile and user_profile.get("username"):
+            return user_profile.get("username")
+        # Fallback if display name or username isn't directly in the fetched profile
+        auth_user = auth.get_user(author_uid, app=firebase_app)
+        if auth_user and auth_user.display_name:
+            return auth_user.display_name
+        if auth_user and auth_user.email:
+            return auth_user.email.split('@')[0] # Fallback to email prefix
+        return "User " + author_uid[:6] # Generic fallback
+    except Exception as e:
+        app.logger.error(f"Error fetching author display name for UID {author_uid}: {e}")
+        return "Unknown Author"
+    
 def get_current_user_id():
     if hasattr(request, 'user') and request.user:
         return request.user.get('uid')
     return None
 
-def get_user_profile_from_firestore(uid):
-    """Fetches and formats user profile data from Firestore."""
-    if not db:
-        app.logger.error("Firestore client not available in get_user_profile_from_firestore.")
+def get_user_profile_and_ensure_daily_reset(uid):
+    """
+    Fetches user profile. If it's a new day, ATOMICALLY resets all daily counters in Firestore.
+    Returns the (potentially updated) user_data dictionary.
+    """
+    if not db: 
+        app.logger.error("get_user_profile_and_ensure_daily_reset: Firestore client not available.")
         return None
-    try:
-        user_doc_ref = db.collection('user').document(uid)
-        user_doc = user_doc_ref.get()
-        
-        if user_doc.exists:
-            firestore_user_data = user_doc.to_dict()
-            auth_user_info = auth.get_user(uid, app=firebase_app) if firebase_app else None
-            
-            join_date_formatted = "N/A"
-            created_at = firestore_user_data.get("createdAt")
-            if created_at and isinstance(created_at, datetime):
-                join_date_formatted = created_at.strftime("%B %Y") # e.g., "June 2025"
-            elif isinstance(created_at, str): # Basic parsing if it's already a string (less ideal)
-                try:
-                    # Attempt to parse if it's a known string format, e.g., ISO
-                    dt_obj = datetime.fromisoformat(created_at.replace("Z", "+00:00")) # Example for ISO
-                    join_date_formatted = dt_obj.strftime("%B %Y")
-                except ValueError:
-                    # If it's the custom string "1 June 2025 at 19:20:16 UTC+7"
-                    # This parsing is specific and might need adjustment based on actual string format
-                    try:
-                        parts = created_at.split(" at ")[0] # "1 June 2025"
-                        dt_obj = datetime.strptime(parts, "%d %B %Y")
-                        join_date_formatted = dt_obj.strftime("%B %Y")
-                    except:
-                        join_date_formatted = "N/A" # Fallback for unknown string format
-                        
-            recipe_made_id_list = firestore_user_data.get("recipeMade", []) # Expecting a list of strings
-        recipe_made_ids = set()
-        for item_id in recipe_made_id_list:
-            if isinstance(item_id, str) and item_id.strip(): # Check if it's a non-empty string
-                recipe_made_ids.add(item_id.strip())
-            elif item_id is not None: # Log if it's not a string but also not None (e.g. a number, or empty string after strip)
-                app.logger.warning(f"Unexpected item type or empty ID in recipeMade for user {uid}: '{item_id}' (type: {type(item_id)})")
-    
-                
-            profile_data = {
-                "uid": uid,
-                "email": firestore_user_data.get("email", auth_user_info.email if auth_user_info else None),
-                "username": firestore_user_data.get("username"),
-                "displayName": firestore_user_data.get("displayName", auth_user_info.display_name if auth_user_info else None),
-                "joinDate": join_date_formatted, # Formatted join date
-                "totalRecipes": len(firestore_user_data.get("recipeMade", [])),
-                "favoriteRecipesCount": len(firestore_user_data.get("favouriteRecipes", [])),
-                # Include other raw data if needed by other parts of the app
-                "caloriesToday": firestore_user_data.get("caloriesToday"),
-                "consumedToday": firestore_user_data.get("consumedToday", []),
-                "favouriteRecipes": firestore_user_data.get("favouriteRecipes", []), # Full array
-                "recipeMade": firestore_user_data.get("recipeMade", []) # Full array
-            }
-            
-            
-            
-            
-            return profile_data
-        else:
-            app.logger.warning(f"No Firestore profile found for UID {uid} in 'user' collection.")
-            # Fallback to auth data if Firestore profile doesn't exist
-            auth_user_info = auth.get_user(uid, app=firebase_app) if firebase_app else None
-            if auth_user_info:
-                join_date_formatted = "N/A"
-                if auth_user_info.user_metadata and auth_user_info.user_metadata.creation_timestamp:
-                    # Firebase creation_timestamp is in milliseconds since epoch
-                    dt_obj = datetime.fromtimestamp(auth_user_info.user_metadata.creation_timestamp / 1000)
-                    join_date_formatted = dt_obj.strftime("%B %Y")
 
-                return {
-                    "uid": uid,
-                    "email": auth_user_info.email,
-                    "displayName": auth_user_info.display_name or (auth_user_info.email.split('@')[0] if auth_user_info.email else "User"),
-                    "username": None,
-                    "joinDate": join_date_formatted,
-                    "totalRecipes": 0,
-                    "favoriteRecipesCount": 0,
-                    "caloriesToday": None,
-                    "consumedToday": [],
-                    "favouriteRecipes": [],
-                    "recipeMade": []
-                }
-            return None
-    except Exception as e:
-        app.logger.error(f"Error fetching Firestore profile for UID {uid}: {e}")
+    user_doc_ref = db.collection('user').document(uid)
+    
+    @firestore.transactional # Use a transaction for atomic read and conditional write
+    def _update_in_transaction(transaction, user_ref_for_tx):
+        user_snapshot = user_ref_for_tx.get(transaction=transaction)
+        if not user_snapshot.exists:
+            app.logger.warning(f"User profile not found for UID: {uid} within transaction.")
+            return None # Or raise an exception
+
+        user_data_tx = user_snapshot.to_dict()
+        today_str = date.today().isoformat()
+        last_activity_date_str = user_data_tx.get('lastActivityDate')
+
+        # Initialize daily fields if they don't exist (for older users)
+        daily_fields_to_ensure = {
+            'caloriesToday': 0, 'consumedToday': [], 'proteinToday': 0.0, 'fatToday': 0.0,
+            'carbsToday': 0.0, 'cholesterolToday': 0.0, 'sodiumToday': 0.0,
+            'potassiumToday': 0.0, 'ironToday': 0.0
+        }
+        needs_initialization_update = False
+        for field, default_value in daily_fields_to_ensure.items():
+            if field not in user_data_tx:
+                user_data_tx[field] = default_value # Update local dict
+                needs_initialization_update = True
+        
+        if last_activity_date_str != today_str or needs_initialization_update:
+            app.logger.info(f"Daily reset or initialization for user {uid}. Last: {last_activity_date_str}, Today: {today_str}")
+            
+            fields_to_update_in_db = {
+                'caloriesToday': 0, 'consumedToday': [], 'proteinToday': 0.0, 'fatToday': 0.0,
+                'carbsToday': 0.0, 'cholesterolToday': 0.0, 'sodiumToday': 0.0,
+                'potassiumToday': 0.0, 'ironToday': 0.0,
+                'lastActivityDate': today_str, 'updatedAt': firestore.SERVER_TIMESTAMP
+            }
+            # If only initialization was needed but day is same, preserve existing values
+            if last_activity_date_str == today_str and needs_initialization_update and not (last_activity_date_str != today_str):
+                for key in daily_fields_to_ensure:
+                    if key in user_data_tx: # Preserve existing values if day is the same but fields were missing
+                        fields_to_update_in_db[key] = user_data_tx[key]
+                fields_to_update_in_db['lastActivityDate'] = last_activity_date_str # Keep old date if it's same day
+            
+            transaction.update(user_ref_for_tx, fields_to_update_in_db)
+            app.logger.info(f"User {uid} daily consumption data updated/reset in Firestore transaction.")
+            
+            # Update user_data_tx to reflect these resets for the current response
+            for key, value in fields_to_update_in_db.items():
+                if key != 'updatedAt': user_data_tx[key] = value
+        
+        return user_data_tx
+
+    try:
+        transaction = db.transaction()
+        final_user_data = _update_in_transaction(transaction, user_doc_ref)
+        return final_user_data
+    except Exception as e_tx:
+        app.logger.error(f"Transaction failed for user {uid} daily reset: {e_tx}")
+        # Fallback to a non-transactional read if transaction fails, but log it heavily.
+        # This might lead to race conditions if multiple requests hit at the exact turn of the day.
+        user_doc_fallback = user_doc_ref.get()
+        if user_doc_fallback.exists: return user_doc_fallback.to_dict()
         return None
+
+
+DEFAULT_CALORIE_GOAL_VALUE = 2240 # Define default for global use
 
 # --- Error Handlers ---
 @app.errorhandler(404)
@@ -266,69 +286,41 @@ def health_check():
 @app.route('/api/auth/register', methods=['POST'])
 def register_user():
     if not db or not firebase_app: return jsonify({"error": "Authentication service not ready."}), 503
-
     data = request.get_json()
-    if not data:
-        return jsonify({"error": "Request body is missing JSON."}), 400
-        
+    if not data: return jsonify({"error": "Request body is missing JSON."}), 400
+    
     email = data.get('email')
     password = data.get('password')
     display_name = data.get('displayName')
-    username = data.get('username') # Optional username
+    username = data.get('username')
 
-    if not email or not password:
-        return jsonify({"error": "Email and password are required"}), 400
+    if not email or not password: return jsonify({"error": "Email and password are required"}), 400
     
-    if not username and display_name: # Use displayName as username if username not provided
-        username = display_name
-    elif not username and email: # Fallback to part of email if no username/displayName
-        username = email.split('@')[0] + uuid.uuid4().hex[:4] # Make it somewhat unique
-    elif not username:
-        username = "user_" + uuid.uuid4().hex[:6] # Generic fallback
-
+    if not username: username = email.split('@')[0] + uuid.uuid4().hex[:4]
 
     try:
-        # Create user in Firebase Authentication
-        user_record = auth.create_user(
-            email=email,
-            password=password,
-            display_name=display_name,
-            app=firebase_app
-        )
+        user_record = auth.create_user(email=email, password=password, display_name=display_name, app=firebase_app)
         app.logger.info(f"User created successfully in Firebase Auth: {user_record.uid}")
 
-        # Create user profile in Firestore
         user_profile_data = {
-            'email': user_record.email,
-            'username': username,
+            'uid': user_record.uid, 'email': user_record.email, 'username': username,
             'displayName': user_record.display_name or username,
-            'uid': user_record.uid,
-            'createdAt': firestore.SERVER_TIMESTAMP,
-            'caloriesToday': 0, # Default value
-            'consumedToday': [],
-            'favouriteRecipes': [],
-            'recipeMade': []
+            'createdAt': firestore.SERVER_TIMESTAMP, 'lastActivityDate': date.today().isoformat(),
+            'dailyCalorieGoal': DEFAULT_CALORIE_GOAL_VALUE,
+            'caloriesToday': 0, 'consumedToday': [], 
+            'proteinToday': 0.0, 'fatToday': 0.0, 'carbsToday': 0.0,
+            'cholesterolToday': 0.0, 'sodiumToday': 0.0, 
+            'potassiumToday': 0.0, 'ironToday': 0.0,
+            'favouriteRecipes': [], 'recipeMade': []
         }
         db.collection('user').document(user_record.uid).set(user_profile_data)
         app.logger.info(f"User profile created in Firestore for UID: {user_record.uid}")
-        
-        # Optionally, you could log the user in directly here by generating a token
-        # and setting the session, but typically registration is separate from immediate login.
-        # For now, just return success.
-
-        return jsonify({"message": "User registered successfully. Please log in.", "uid": user_record.uid}),    
-
+        return jsonify({"message": "User registered successfully. Please log in.", "uid": user_record.uid}), 201
     except firebase_admin.auth.EmailAlreadyExistsError:
-        app.logger.warning(f"Registration attempt with existing email: {email}")
-        return jsonify({"error": "Email already exists"}), 409 # 409 Conflict
-    except firebase_admin.auth.FirebaseAuthError as e:
-        app.logger.error(f"Firebase Auth error during registration: {e}")
-        return jsonify({"error": "Registration failed due to a Firebase error", "details": str(e)}), 500
-    except Exception as e:
-        app.logger.error(f"Unexpected error during registration: {e}")
-        # If user was created in Auth but failed in Firestore, you might want to clean up Auth user.
-        # This is complex rollback logic not implemented here for brevity.
-        return jsonify({"error": "An unexpected error occurred during registration.", "details": str(e)}), 500
+        return jsonify({"error": "Email already exists"}), 409
+    except Exception as e_reg:
+        app.logger.error(f"Error during registration: {e_reg}")
+        return jsonify({"error": "Registration failed.", "details": str(e_reg)}), 500
 
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -359,7 +351,7 @@ def session_login():
             app.logger.info(f"User {response_data.get('email')} logged in successfully. Session created.")
 
             firebase_uid = response_data.get('localId')
-            user_profile_data = get_user_profile_from_firestore(firebase_uid)
+            user_profile_data = get_user_profile_and_ensure_daily_reset(firebase_uid)
 
             if not user_profile_data:
                 # This case means user exists in Auth but not in Firestore 'user' collection.
@@ -374,6 +366,12 @@ def session_login():
                     'uid': firebase_uid,
                     'createdAt': firestore.SERVER_TIMESTAMP,
                     'caloriesToday': 0,
+                    'fatToday': 0, # Default value
+                    'proteinToday': 0, # Default value
+                    'ironToday': 0, # Default value
+                    'cholesterolToday': 0, # Default value
+                    'sodiumToday': 0, # Default value
+                    'potassiumToday': 0, # Default value
                     'consumedToday': [],
                     'favouriteRecipes': [],
                     'recipeMade': []
@@ -480,25 +478,80 @@ def forgot_password():
         app.logger.error(f"Request to Firebase for password reset failed: {e}")
         return jsonify({"error": "Failed to connect to authentication service for password reset."}), 503
 
-@app.route('/api/user/profile', methods=['GET'])
+@app.route('/api/user/home', methods=['GET'])
 @firebase_auth_required
-def get_user_profile():
-    """Endpoint to get the authenticated user's profile data."""
+def get_user_home_data():
     uid = get_current_user_id()
-    if not uid:
-        # This should ideally not happen if @firebase_auth_required works correctly
-        return jsonify({"error": "Unauthorized - User ID not found in token"}), 401 
+    if not db: return jsonify({"error": "Database service unavailable."}), 503
 
-    user_profile = get_user_profile_from_firestore(uid)
+    user_data = get_user_profile_and_ensure_daily_reset(uid)
 
-    if user_profile:
-        return jsonify(user_profile), 200
-    else:
-        # This case could mean the user exists in Firebase Auth but not in Firestore,
-        # and the fallback in get_user_profile_from_firestore also failed, 
-        # or a general error occurred.
-        # The get_user_profile_from_firestore function already logs errors.
-        return jsonify({"error": "User profile not found or error fetching data."}), 404
+    if not user_data:
+        return jsonify({"error": "User profile not found or error during reset."}), 404
+
+    # 1. Find the globally most liked recipe
+    globally_recommended_recipe_details = None
+    try:
+        recipes_ref = db.collection('recipe')
+        query = recipes_ref.order_by('likes', direction=firestore.Query.DESCENDING).limit(1)
+        top_liked_recipe_docs = list(query.stream()) 
+
+        if top_liked_recipe_docs:
+            top_recipe_data = top_liked_recipe_docs[0].to_dict()
+            globally_recommended_recipe_details = {
+                "id": top_liked_recipe_docs[0].id,
+                "name": top_recipe_data.get("name", "Top Rated Dish"),
+                "image": top_recipe_data.get("image", top_recipe_data.get("imageUrl")),
+                "description": top_recipe_data.get("description", "A community favorite!"), 
+                "calories": top_recipe_data.get("calories"), 
+                "likes": top_recipe_data.get("likes", 0)
+            }
+        else:
+            app.logger.info(f"No recipes found with 'likes' field for global recommendation.")
+    except Exception as e_rec:
+        app.logger.error(f"Error fetching globally recommended recipe: {e_rec}. Check Firestore indexes for 'recipe' collection on 'likes' (descending).")
+
+    # 2. Fetch details for today's consumed recipes (for download summary)
+    consumed_today_ids = user_data.get('consumedToday', [])
+    consumed_today_detailed_list = []
+    if consumed_today_ids: 
+        unique_consumed_ids = list(set(consumed_today_ids)) 
+        for r_id in unique_consumed_ids:
+            try:
+                recipe_doc_snap = db.collection('recipe').document(r_id).get()
+                if recipe_doc_snap.exists:
+                    r_details = recipe_doc_snap.to_dict()
+                    consumed_today_detailed_list.append({
+                        "id": recipe_doc_snap.id,
+                        "name": r_details.get("name", "N/A"),
+                        "calories": r_details.get("calories"), "image": r_details.get("image", r_details.get("imageUrl")),
+                        "protein": r_details.get("protein"), "fat": r_details.get("fat"), "carbs": r_details.get("carbs"),
+                    })
+            except Exception as e_consumed_item_fetch:
+                 app.logger.error(f"Error fetching detail for consumed recipe ID {r_id} for user {uid}: {e_consumed_item_fetch}")
+    
+    ordered_consumed_details = []
+    if consumed_today_ids and consumed_today_detailed_list:
+        recipe_map_by_id = {recipe['id']: recipe for recipe in consumed_today_detailed_list}
+        for r_id in consumed_today_ids: 
+            if r_id in recipe_map_by_id:
+                ordered_consumed_details.append(dict(recipe_map_by_id[r_id]))
+
+    home_payload = {
+        "displayName": user_data.get("displayName", "User"),
+        "caloriesToday": user_data.get("caloriesToday", 0),
+        "dailyCalorieGoal": user_data.get("dailyCalorieGoal", DEFAULT_CALORIE_GOAL_VALUE),
+        "consumedTodayDetails": ordered_consumed_details, 
+        "globallyRecommendedRecipe": globally_recommended_recipe_details,
+        "totalProteinToday": round(user_data.get("proteinToday", 0.0), 1),
+        "totalFatToday": round(user_data.get("fatToday", 0.0), 1),
+        "totalCarbsToday": round(user_data.get("carbsToday", 0.0), 1),
+        "totalCholesterolToday": round(user_data.get("cholesterolToday", 0.0), 1),
+        "totalSodiumToday": round(user_data.get("sodiumToday", 0.0), 1),
+        "totalPotassiumToday": round(user_data.get("potassiumToday", 0.0), 1),
+        "totalIronToday": round(user_data.get("ironToday", 0.0), 1),
+    }
+    return jsonify(home_payload), 200
 
 @app.route('/api/recipes/my-recipes', methods=['GET'])
 @firebase_auth_required
@@ -542,7 +595,6 @@ def get_my_recipes():
         for fav_item in favourite_recipe_ids_list:
             if not (isinstance(fav_item, str) and fav_item.strip()):
                  app.logger.warning(f"Unexpected item type or empty ID in favouriteRecipes for user {uid}: '{fav_item}' (type: {type(fav_item)})")
-
 
         # 3. Combine into a unique set of all recipe IDs to fetch from the 'recipes' collection
         all_recipe_ids_to_fetch = list(recipe_made_ids.union(favourite_recipe_ids_set))
@@ -640,13 +692,6 @@ def get_public_recipes():
             recipe_data = doc.to_dict()
             recipe_data['id'] = doc.id 
             
-            # Map and provide defaults based on the new detailed schema
-            # User provided: 'image' -> map to 'imageUrl'
-            # User provided: 'maker' -> map to 'authorName'
-            # User provided: 'time' (number) -> format to 'cookTime' (string)
-            # User provided: 'calories' (number) -> use as 'caloriesPerServing' (number)
-            # User provided: 'likes' -> map to 'savesCount' for consistency with current UI save action
-            
             # Ensure all expected fields by frontend are present or defaulted
             formatted_recipe = {
                 "id": recipe_data.get('id'),
@@ -694,7 +739,7 @@ def get_public_recipes():
                 if uid:
                     user_doc = db.collection('user').document(uid).get()
                     if user_doc.exists:
-                        current_user_saved_ids = user_doc.to_dict().get('savedPublicRecipeIds', [])
+                        current_user_saved_ids = user_doc.to_dict().get('favoriteRecipes', [])
             except Exception: 
                 pass 
         
@@ -724,7 +769,7 @@ def toggle_public_recipe_save():
 
         saved_ids = []
         user_doc = user_doc_ref.get()
-        if user_doc.exists: saved_ids = user_doc.to_dict().get('savedPublicRecipeIds', [])
+        if user_doc.exists: saved_ids = user_doc.to_dict().get('favouriteRecipes', [])
         
         is_now_saved = False
         # Use 'likes' field from publicRecipe doc for savesCount if that's the intention
@@ -739,8 +784,8 @@ def toggle_public_recipe_save():
             public_recipe_doc_ref.update({"likes": firestore.Increment(1)}) # Increment 'likes'
             is_now_saved = True
         
-        if user_doc.exists: user_doc_ref.update({"savedPublicRecipeIds": saved_ids})
-        else: user_doc_ref.set({"savedPublicRecipeIds": saved_ids}, merge=True)
+        if user_doc.exists: user_doc_ref.update({"favouriteRecipes": saved_ids})
+        else: user_doc_ref.set({"favouriteRecipes": saved_ids}, merge=True)
         
         # Fetch the updated likes count to return
         updated_recipe_doc = public_recipe_doc_ref.get()
@@ -759,53 +804,65 @@ def toggle_public_recipe_save():
 @app.route('/api/recipes/add', methods=['POST'])
 @firebase_auth_required
 def add_user_recipe():
-    
-    app.logger.info(f"--- Add Recipe Request ---")
-    app.logger.info(f"Content-Type Header from Flask: {request.content_type}") # Very important
-    app.logger.info(f"Request Headers from Flask: {request.headers}")
+    uid = get_current_user_id()
+    if not uid: # Should be caught by decorator, but as a safeguard
+        return jsonify({"error": "User authentication failed."}), 401
+
+    app.logger.info(f"--- Add Recipe Request for UID: {uid} ---")
     app.logger.info(f"Request Form Data: {request.form.to_dict()}")
     app.logger.info(f"Request Files: {request.files.to_dict()}")
-    app.logger.info(f"--- End Add Recipe Request Log ---")
     
-    
-    uid = get_current_user_id()
-    user_display_name = request.user.get('name', request.user.get('email', 'Unknown User'))
-
     if 'recipeData' not in request.form:
         return jsonify({"error": "Missing recipeData in form"}), 400
 
     try:
         data_str = request.form['recipeData']
-        data = json.loads(data_str) # Parse the JSON string from FormData
+        data = json.loads(data_str)
     except json.JSONDecodeError:
         return jsonify({"error": "Invalid JSON format for recipeData"}), 400
     except Exception as e:
         app.logger.error(f"Error accessing form data: {e}")
         return jsonify({"error": "Could not process form data"}), 400
 
-
+    # Validate required fields from parsed JSON data
     recipe_name = data.get('recipeName')
-    ingredients_data = data.get('ingredients', []) 
-    steps_data = data.get('steps', [])
+    # Ingredients are now an array of strings
+    ingredients_list = data.get('ingredients', []) 
+    steps_list = data.get('steps', [])
+    category = data.get('category')
 
-    if not recipe_name or not ingredients_data or not steps_data:
-        return jsonify({"error": "Missing required fields: recipeName, ingredients, or steps"}), 400
+    if not recipe_name or not isinstance(recipe_name, str) or not recipe_name.strip():
+        return jsonify({"error": "Recipe name is required and must be a non-empty string."}), 400
+    if not category or not isinstance(category, str) or not category.strip():
+        return jsonify({"error": "Category is required."}), 400
+    if not ingredients_list or not isinstance(ingredients_list, list) or not all(isinstance(item, str) for item in ingredients_list):
+        return jsonify({"error": "Ingredients are required and must be a list of strings."}), 400
+    if not steps_list or not isinstance(steps_list, list) or not all(isinstance(item, str) for item in steps_list):
+        return jsonify({"error": "Steps are required and must be a list of strings."}), 400
+    
+    # Filter out empty strings from ingredients and steps
+    valid_ingredients = [ing.strip() for ing in ingredients_list if ing.strip()]
+    valid_steps = [step.strip() for step in steps_list if step.strip()]
 
-    uploaded_image_url = data.get('imageUrl', '') 
+    if not valid_ingredients:
+        return jsonify({"error": "At least one valid ingredient is required."}), 400
+    if not valid_steps:
+        return jsonify({"error": "At least one valid step is required."}), 400
+
+    uploaded_image_url = data.get('imageUrl', '') # For pre-filled image URL if no new file
 
     # Handle file upload if present
     if 'recipeImageFile' in request.files:
         file_to_upload = request.files['recipeImageFile']
         if file_to_upload and file_to_upload.filename != '':
+            # Cloudinary config check (assuming it's done globally)
             if not (os.environ.get("CLOUDINARY_CLOUD_NAME") and os.environ.get("CLOUDINARY_API_KEY") and os.environ.get("CLOUDINARY_API_SECRET")):
-                app.logger.error("Cloudinary credentials not configured. Cannot upload image.")
-                return jsonify({"error": "Image upload service not configured on server."}), 500
+                app.logger.error("Cloudinary credentials not configured for image upload.")
+                return jsonify({"error": "Image upload service not configured."}), 500
             try:
-                app.logger.info(f"Attempting to upload {file_to_upload.filename} to Cloudinary.")
-                # You might want to specify a folder or public_id strategy
                 upload_result = cloudinary.uploader.upload(
                     file_to_upload,
-                    folder="FitPlate", # Example folder
+                    folder="FitPlate_Recipes", # Specific folder for recipe images
                     overwrite=True, 
                     resource_type="image"
                 )
@@ -813,78 +870,357 @@ def add_user_recipe():
                 app.logger.info(f"Image uploaded to Cloudinary: {uploaded_image_url}")
             except Exception as e:
                 app.logger.error(f"Cloudinary upload failed: {e}")
-                return jsonify({"error": f"Image upload failed: {e}"}), 500
-        elif data.get('imageUrl'): # If no new file, but an old imageUrl was passed
-             uploaded_image_url = data.get('imageUrl')
-        else: # No new file and no old image URL
-            uploaded_image_url = '' # Or a default placeholder URL
-
+                return jsonify({"error": f"Image upload failed: {str(e)}"}), 500
+    
     new_recipe_id = str(uuid.uuid4()) 
     
-    try:
-        cooking_time_minutes = int(data.get('cookingTime', 0))
-    except ValueError:
-        cooking_time_minutes = 0
-    
-    processed_ingredients = []
-    total_carbs, total_cholesterol, total_fat, total_protein = 0.0, 0.0, 0.0, 0.0
-    total_sodium, total_potassium, total_iron, total_calories_from_ingredients = 0.0, 0.0, 0.0, 0.0
-
-    for ing_data in ingredients_data:
-        processed_ingredient = {
-            "id": ing_data.get("id"),  
-        }
-        processed_ingredients.append(processed_ingredient)
+    def get_float_or_none(value_str):
+        if value_str is None or (isinstance(value_str, str) and not value_str.strip()):
+            return None
         try:
-            total_carbs += float(ing_data.get('carbs', 0) or 0)
-            total_cholesterol += float(ing_data.get('cholesterol', ing_data.get('cholestrol', 0)) or 0)
-            total_fat += float(ing_data.get('fat', 0) or 0)
-            total_protein += float(ing_data.get('protein', 0) or 0)
-            total_sodium += float(ing_data.get('sodium', 0) or 0)
-            total_potassium += float(ing_data.get('potassium', 0) or 0)
-            total_iron += float(ing_data.get('iron', 0) or 0)
-            total_calories_from_ingredients += float(ing_data.get('calories', 0) or 0)
-        except (ValueError, TypeError) as e:
-            app.logger.warning(f"Nutritional parse error for ingredient {ing_data.get('name')}: {e}")
-
-    servings = int(data.get('servings', 1) or 1)
-    if servings < 1: servings = 1 # Ensure servings is at least 1
+            return float(value_str)
+        except (ValueError, TypeError):
+            return None # Or raise error, or return 0, depending on strictness
 
     new_recipe_entry = {
-        "id": new_recipe_id,
-        "name": recipe_name,
-        "description": data.get('description', ''),
-        "category": data.get('category', 'Uncategorized'),
-        "time": cooking_time_minutes, 
-        "imageUrl": uploaded_image_url, # Use the URL from Cloudinary or existing
-        "ingredients": processed_ingredients,
-        "steps": steps_data,
-        "makerId": uid,
-        "servings": servings,
-        "calories": data.get('calories') if data.get('calories') is not None else (round(total_calories_from_ingredients / servings, 2) if servings > 0 else round(total_calories_from_ingredients, 2)),
-        "carbs": round(total_carbs, 2),
-        "cholesterol": round(total_cholesterol, 2),
-        "fat": round(total_fat, 2),
-        "protein": round(total_protein, 2),
-        "sodium": round(total_sodium, 2),
-        "potassium": round(total_potassium, 2),
-        "iron": round(total_iron, 2),
-        "createdAt": firestore.SERVER_TIMESTAMP
+        # "id": new_recipe_id, # Firestore document ID will serve as the ID
+        "name": recipe_name.strip(),
+        "description": data.get('description', '').strip(),
+        "category": category.strip(),
+        "time": int(data.get('cookingTime', 0) or 0), # Cooking time in minutes
+        "image": uploaded_image_url, # Use 'image' to match your DB schema example
+        "ingredients": valid_ingredients, # Now an array of strings
+        "steps": valid_steps,           # Array of strings
+        "maker": uid,                   # Renamed from makerId to match DB schema example 'maker'
+        "serving": int(data.get('servings', 1) or 1), # Renamed from servings to match DB schema example 'serving'
+        "likes": 0, # Initial likes count
+        "createdAt": firestore.SERVER_TIMESTAMP,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+        "createdFrom": data.get("createdFrom", "manual"),
+
+        # Nutrition Facts (handle None for empty inputs)
+        "calories": get_float_or_none(data.get('calories')),
+        "protein": get_float_or_none(data.get('protein')),
+        "fat": get_float_or_none(data.get('fat')),
+        "carbs": get_float_or_none(data.get('carbs')),
+        "cholesterol": get_float_or_none(data.get('cholesterol')), # Use "cholesterol" from frontend
+        "sodium": get_float_or_none(data.get('sodium')),
+        "potassium": get_float_or_none(data.get('potassium')),
+        "iron": get_float_or_none(data.get('iron')),
     }
-    if data.get('calories') is not None:
-        try: new_recipe_entry["calories"] = float(data.get('calories'))
-        except (ValueError, TypeError): pass 
+    # Filter out None values from nutrition if you don't want to store nulls
+    new_recipe_entry = {k: v for k, v in new_recipe_entry.items() if v is not None}
+
+
+    try:
+        # Save to the main 'recipe' collection
+        recipe_doc_ref = db.collection('recipe').document(new_recipe_id)
+        recipe_doc_ref.set(new_recipe_entry)
+        app.logger.info(f"Recipe {new_recipe_id} added to 'recipe' collection by user {uid}.")
+
+        # Update user's 'recipeMade' list with the new recipe ID
+        user_doc_ref = db.collection('user').document(uid)
+        user_doc_ref.update({
+            "recipeMade": firestore.ArrayUnion([new_recipe_id])
+        })
+        app.logger.info(f"User {uid} recipeMade list updated with {new_recipe_id}.")
+        
+        # Return the ID and the data that was saved for client-side confirmation/use
+        response_data = new_recipe_entry.copy()
+        response_data.pop('createdAt', None) 
+        response_data.pop('updatedAt', None)
+        response_data['id'] = new_recipe_id # Add the generated ID to the response
+
+        return jsonify({"message": "Recipe added successfully!", "recipeId": new_recipe_id, "recipeData": response_data}), 201
+    except Exception as e:
+        app.logger.error(f"Error saving recipe for user {uid} to Firestore: {e}")
+        import traceback
+        app.logger.error(traceback.format_exc())
+        return jsonify({"error": "Failed to save recipe to database due to a server issue."}), 500
+    
+@app.route('/api/recipes/public/<string:recipe_id>', methods=['GET'])
+def get_public_recipe_detail(recipe_id):
+    """Fetches a single public recipe by its ID with detailed attributes,
+    formatted for the RecipeDetailPage."""
+    if not db:
+        return jsonify({"error": "Database service not available"}), 503
+    try:
+        recipe_doc_ref = db.collection('recipe').document(recipe_id)
+        recipe_doc = recipe_doc_ref.get()
+
+        if not recipe_doc.exists:
+            return jsonify({"error": "Recipe not found"}), 404
+
+        recipe_data = recipe_doc.to_dict()
+        author_name = "Unknown Author"
+        if recipe_data.get('maker'):
+            author_name = get_author_display_name(recipe_data['maker'])
+
+        # Format cookTime (assuming 'time' is in minutes)
+        cook_time_str = "N/A"
+        time_val = recipe_data.get('time')
+        if isinstance(time_val, (int, float)):
+            cook_time_str = f"{int(time_val)} Mins"
+        elif isinstance(time_val, str) and time_val.strip(): # If already a string
+             cook_time_str = time_val
+
+
+        formatted_recipe = {
+            "id": recipe_doc.id,
+            "name": recipe_data.get('name', 'Untitled Recipe'),
+            "author": author_name, # Use the fetched author name
+            "authorId": recipe_data.get('maker'), # Include maker UID
+            "likes": recipe_data.get('likes', 0),
+            "cookTime": cook_time_str,
+            "servings": recipe_data.get('serving', recipe_data.get('servings', 1)),
+            "image": recipe_data.get('image', recipe_data.get('imageUrl')), # Use 'image' or 'imageUrl'
+            "description": recipe_data.get('description', ''),
+            "nutrition": {
+                "calories": recipe_data.get('calories'),
+                "totalFat": recipe_data.get('fat'),
+                "protein": recipe_data.get('protein'),
+                "carbohydrates": recipe_data.get('carbs'),
+                "cholesterol": recipe_data.get('cholestrol', recipe_data.get('cholesterol')), # Handle common typo
+                "sodium": recipe_data.get('sodium'),
+                "iron": recipe_data.get('iron'),
+                "potassium": recipe_data.get('potassium'),
+                # Vitamins are intentionally omitted as per request
+            },
+            "ingredients": recipe_data.get('ingredients', []), # Expecting an array of strings
+            "steps": recipe_data.get('steps', []), # Expecting an array of strings
+            "category": recipe_data.get('category', 'General'),
+            "createdAt": recipe_data['createdAt'].isoformat() if 'createdAt' in recipe_data and isinstance(recipe_data['createdAt'], datetime) else recipe_data.get('createdAt'),
+            "updatedAt": recipe_data['updatedAt'].isoformat() if 'updatedAt' in recipe_data and isinstance(recipe_data['updatedAt'], datetime) else None,
+        }
+        
+        # Determine if the recipe is a favorite for the current user (if authenticated)
+        is_favorite_by_current_user = False
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            try:
+                id_token = auth_header.split('Bearer ')[1]
+                decoded_token = auth.verify_id_token(id_token, app=firebase_app, check_revoked=True)
+                uid = decoded_token.get('uid')
+                if uid:
+                    user_doc = db.collection('user').document(uid).get()
+                    if user_doc.exists:
+                        user_data = user_doc.to_dict()
+                        # Check against 'favouriteRecipes' (user's own recipes) and 'favoriteRecipes'
+                        if recipe_doc.id in user_data.get('favouriteRecipes', []) or \
+                           recipe_doc.id in user_data.get('favoriteRecipes', []):
+                           is_favorite_by_current_user = True
+            except Exception as e_auth:
+                app.logger.info(f"Could not determine favorite status for recipe {recipe_id} (user not logged in or token error): {e_auth}")
+        
+        formatted_recipe['isFavoriteByCurrentUser'] = is_favorite_by_current_user # For client-side like button state
+
+
+        return jsonify(formatted_recipe), 200
+
+    except Exception as e:
+        app.logger.error(f"Error fetching recipe detail for {recipe_id}: {e}")
+        import traceback
+        app.logger.error(traceback.format_exc())
+        return jsonify({"error": "Failed to fetch recipe details"}), 500
+    
+@app.route('/api/user/pick-recipe', methods=['POST'])
+@firebase_auth_required
+def consume_recipe_and_update_totals():
+    uid = get_current_user_id()
+    if not db: return jsonify({"error": "Database service unavailable."}), 503
+
+    data = request.get_json()
+    recipe_id = data.get('recipeId')
+    if not recipe_id: return jsonify({"error": "recipeId is required."}), 400
+
+    try:
+        recipe_doc_ref = db.collection('recipe').document(recipe_id)
+        recipe_doc = recipe_doc_ref.get()
+        if not recipe_doc.exists: return jsonify({"error": "Recipe not found."}), 404
+        
+        recipe_data = recipe_doc.to_dict()
+        
+        nutrients_from_recipe = {
+            'calories': get_float_from_data(recipe_data, 'calories'),
+            'protein': get_float_from_data(recipe_data, 'protein'),
+            'fat': get_float_from_data(recipe_data, 'fat'),
+            'carbs': get_float_from_data(recipe_data, 'carbs'),
+            'cholesterol': get_float_from_data(recipe_data, 'cholesterol', recipe_data.get('cholestrol')),
+            'sodium': get_float_from_data(recipe_data, 'sodium'),
+            'potassium': get_float_from_data(recipe_data, 'potassium'),
+            'iron': get_float_from_data(recipe_data, 'iron')
+        }
+
+        user_doc_ref = db.collection('user').document(uid)
+
+        @firestore.transactional
+        def _update_consumption_in_transaction(transaction, user_ref_for_tx):
+            user_snapshot = user_ref_for_tx.get(transaction=transaction)
+            if not user_snapshot.exists:
+                # This should ideally not happen if user is authenticated
+                raise Exception("User profile not found during transaction.") 
+
+            user_data_tx = user_snapshot.to_dict()
+            today_str_tx = date.today().isoformat() 
+            last_activity_date_tx = user_data_tx.get('lastActivityDate')
+
+            update_fields_tx = {
+                'lastActivityDate': today_str_tx,
+                'updatedAt': firestore.SERVER_TIMESTAMP
+            }
+
+            if last_activity_date_tx != today_str_tx:
+                app.logger.info(f"Daily reset for user {uid} in consume_recipe TX. Last: {last_activity_date_tx}, Today: {today_str_tx}")
+                update_fields_tx['consumedToday'] = [recipe_id] # Start new list
+                for key, value in nutrients_from_recipe.items():
+                    update_fields_tx[key + 'Today'] = value # Set nutrient to current recipe's value
+            else:
+                update_fields_tx['consumedToday'] = firestore.ArrayUnion([recipe_id])
+                for key, value in nutrients_from_recipe.items():
+                    update_fields_tx[key + 'Today'] = firestore.Increment(value) # Increment existing
+            
+            transaction.update(user_ref_for_tx, update_fields_tx)
+            # Return the fields that were set/incremented for logging and response
+            return update_fields_tx, last_activity_date_tx != today_str_tx 
+
+        # Execute the transaction
+        updated_fields, was_reset = _update_consumption_in_transaction(db.transaction(), user_doc_ref)
+        
+        action_type = "set (new day)" if was_reset else "incremented"
+        app.logger.info(f"User {uid} consumed recipe {recipe_id}. Nutritionals {action_type}.")
+        
+        # Re-fetch user data to get the absolute final values after Increment
+        final_user_data_doc = user_doc_ref.get()
+        final_user_data = final_user_data_doc.to_dict() if final_user_data_doc.exists else {}
+
+        return jsonify({
+            "message": "Recipe consumed successfully.",
+            "consumedRecipeId": recipe_id,
+            "recipeName": recipe_data.get("name"),
+            "recipeCalories": nutrients_from_recipe['calories'],
+            "dailyTotals": {
+                "caloriesToday": final_user_data.get('caloriesToday', 0),
+                "proteinToday": final_user_data.get('proteinToday', 0.0),
+                "fatToday": final_user_data.get('fatToday', 0.0),
+                "carbsToday": final_user_data.get('carbsToday', 0.0),
+                "cholesterolToday": final_user_data.get('cholesterolToday', 0.0),
+                "sodiumToday": final_user_data.get('sodiumToday', 0.0),
+                "potassiumToday": final_user_data.get('potassiumToday', 0.0),
+                "ironToday": final_user_data.get('ironToday', 0.0),
+            },
+            "consumedTodayList": final_user_data.get('consumedToday', [])
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error in consume_recipe_and_update_totals for {recipe_id}, user {uid}: {e}")
+        import traceback
+        app.logger.error(traceback.format_exc())
+        return jsonify({"error": "Failed to record recipe consumption."}), 500
+    
+@app.route('/api/user/todays-consumed-recipes', methods=['GET'])
+@firebase_auth_required
+def get_todays_consumed_recipes_detailed():
+    """
+    Fetches the user's `consumedToday` recipe IDs. If it's a new day,
+    it resets `consumedToday` and `caloriesToday` in Firestore and returns an empty list.
+    Otherwise, it fetches full details for each recipe ID in `consumedToday` individually.
+    """
+    uid = get_current_user_id()
+
+    if not db:
+        app.logger.error("Firestore client (db) is not initialized for todays-consumed-recipes.")
+        return jsonify({"error": "Database service not available."}), 503
 
     try:
         user_doc_ref = db.collection('user').document(uid)
-        user_doc_ref.update({
-            "recipeMade": firestore.ArrayUnion([new_recipe_entry])
-        })
-        app.logger.info(f"User {uid} added new recipe: {new_recipe_id}")
-        return jsonify({"message": "Recipe added successfully!", "recipeId": new_recipe_id, "recipeData": new_recipe_entry}), 201
+        user_doc = user_doc_ref.get()
+
+        if not user_doc.exists:
+            app.logger.warning(f"User profile not found for UID: {uid} in get_todays_consumed_recipes_detailed")
+            return jsonify({"error": "User profile not found."}), 404
+
+        user_data = user_doc.to_dict()
+        today_str = date.today().isoformat()  # YYYY-MM-DD format
+
+        consumed_today_ids = user_data.get('consumedToday', [])
+        last_activity_date_str = user_data.get('lastActivityDate')
+        
+        if last_activity_date_str != today_str:
+            app.logger.info(f"Daily reset triggered for user {uid}. Last activity: {last_activity_date_str}, Today: {today_str}")
+            consumed_today_ids = [] 
+            user_doc_ref.update({
+                'caloriesToday': 0,
+                'consumedToday': [], 
+                'lastActivityDate': today_str,
+                'updatedAt': firestore.SERVER_TIMESTAMP 
+            })
+            app.logger.info(f"User {uid} daily consumption data reset in Firestore.")
+        
+        if not consumed_today_ids:
+            return jsonify([]), 200
+
+        detailed_consumed_recipes = []
+        
+        # Fetch each recipe document individually
+        for recipe_id in list(set(consumed_today_ids)): # Use set to avoid duplicate fetches if IDs are repeated
+            if not recipe_id or not isinstance(recipe_id, str): # Skip invalid IDs
+                app.logger.warning(f"Skipping invalid recipe ID: {recipe_id} for user {uid}")
+                continue
+
+            recipe_doc_ref = db.collection('recipe').document(recipe_id)
+            recipe_doc_snap = recipe_doc_ref.get()
+            
+            if recipe_doc_snap.exists:
+                recipe_details = recipe_doc_snap.to_dict()
+                
+                cook_time_str = "N/A"
+                time_val = recipe_details.get('time')
+                if isinstance(time_val, (int, float)):
+                    cook_time_str = f"{int(time_val)} min"
+                elif isinstance(time_val, str) and time_val.strip():
+                    cook_time_str = time_val
+                
+                formatted = {
+                    "id": recipe_doc_snap.id,
+                    "name": recipe_details.get('name', 'N/A'),
+                    "image": recipe_details.get('image', recipe_details.get('imageUrl')),
+                    "calories": recipe_details.get('calories'), 
+                    "ingredients": recipe_details.get('ingredients', []),
+                    "steps": recipe_details.get('steps', []),
+                    "protein": recipe_details.get('protein'),
+                    "fat": recipe_details.get('fat'),
+                    "carbs": recipe_details.get('carbs'),
+                    "servings": recipe_details.get('serving', recipe_details.get('servings')),
+                    "cookTime": cook_time_str,
+                    "description": recipe_details.get('description'),
+                    "category": recipe_details.get('category'),
+                }
+                detailed_consumed_recipes.append(formatted)
+            else:
+                app.logger.warning(f"Recipe ID {recipe_id} from user {uid}'s consumedToday not found in 'recipe' collection.")
+        
+        # To maintain the original order of consumption if duplicates were present and order matters:
+        final_ordered_list = []
+        recipe_map_by_id = {recipe['id']: recipe for recipe in detailed_consumed_recipes}
+        for r_id in consumed_today_ids: # Iterate through the original list (which may have duplicates)
+            if r_id in recipe_map_by_id:
+                # Create a copy to avoid issues if the same recipe was consumed multiple times
+                # and you need to represent each instance uniquely in the list (e.g., if they had different portions later)
+                # For just displaying, a direct reference is fine if the front-end handles display of duplicates.
+                final_ordered_list.append(dict(recipe_map_by_id[r_id])) # Appending a copy
+            else:
+                # This case should ideally be caught by the logger above if a recipe ID wasn't found
+                app.logger.warning(f"Recipe ID {r_id} was in consumed_today_ids but not found/fetched for final list for user {uid}.")
+        
+        return jsonify(final_ordered_list), 200
+
     except Exception as e:
-        app.logger.error(f"Error saving recipe for user {uid}: {e}")
-        return jsonify({"error": "Failed to save recipe"}), 500
+        app.logger.error(f"Error fetching today's consumed recipes for user {uid}: {e}")
+        import traceback
+        app.logger.error(traceback.format_exc())
+        return jsonify({"error": "Failed to fetch consumed recipes due to a server error."}), 500
+
+
 
 if __name__ == '__main__':
     is_development = os.environ.get('FLASK_ENV', 'production').lower() == 'development'
