@@ -528,6 +528,8 @@ def get_user_home_data():
         "totalSodiumToday": round(user_data.get("sodiumToday", 0.0), 1),
         "totalPotassiumToday": round(user_data.get("potassiumToday", 0.0), 1),
         "totalIronToday": round(user_data.get("ironToday", 0.0), 1),
+        "totalRecipes": len(user_data.get("recipeMade", [])),
+        "favoriteRecipesCount": len(user_data.get("favouriteRecipes", [])),
     }
     return jsonify(home_payload), 200
 
