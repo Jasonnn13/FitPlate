@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from "react"
 interface UserProfileData {
   displayName: string;
   email: string;
-  joinDate: string; // e.g., "January 2024"
+  joinDate: string; 
   totalRecipes: number;
   favoriteRecipesCount: number;
   username?: string; // Optional
@@ -203,7 +203,6 @@ export default function SettingsPage({
               <div className="flex-1">
                 <h2 className="text-lg font-bold">{userProfile.displayName || userProfile.username || "User"}</h2>
                 <p className="text-gray-600 dark:text-gray-400 text-sm">{userProfile.email}</p>
-                <p className="text-gray-500 dark:text-gray-500 text-xs">Member since {userProfile.joinDate}</p>
               </div>
               <Button variant="ghost" size="icon" className="text-blue-500 hover:bg-blue-50 dark:hover:bg-gray-700">
                 <Edit className="h-5 w-5" />
