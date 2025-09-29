@@ -47,12 +47,7 @@ cd FitPlate
 
 ### 2. Running the Flask Backend
 
-1. **Navigate to the backend directory**  
-   (The Flask API is in `app.py` at the root or in a backend folder. Adjust as needed.)
-
-   ```bash
-   cd backend   # If backend is a folder, otherwise stay at root
-   ```
+1. **The Flask API is in `app.py` at the root of the repository.**
 
 2. **Create & activate a virtual environment (recommended)**
 
@@ -69,7 +64,7 @@ cd FitPlate
 
 4. **Configure environment variables**
 
-   Create a `.env` file in the backend directory with your Firebase and other secrets:
+   Create a `.env` file in the root directory with your Firebase and other secrets:
 
    ```
    FIREBASE_API_KEY=your_firebase_api_key
@@ -97,7 +92,7 @@ cd FitPlate
 1. **Navigate to the frontend directory**
 
    ```bash
-   cd ../frontend
+   cd frontend
    ```
 
 2. **Install dependencies**
@@ -136,11 +131,10 @@ cd FitPlate
 
 ```
 FitPlate/
-├── backend/       # Flask (Python) API
-│   ├── app.py
-│   ├── requirements.txt
-│   └── .env
-├── frontend/      # Next.js (TypeScript) frontend
+├── app.py             # Flask (Python) API entrypoint
+├── requirements.txt
+├── .env               # Flask/Firebase secrets
+├── frontend/          # Next.js (TypeScript) frontend
 │   ├── package.json
 │   ├── pages/
 │   └── .env.local
