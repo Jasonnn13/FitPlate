@@ -10,23 +10,23 @@ FitPlate is a modern web application designed to help users track their daily ca
 
 - Track calories and nutrition for daily meals
 - Discover and save healthy recipes
-- User-friendly dashboard and analytics
-- Built with Next.js (frontend) and Flask (backend API)
+- User dashboard and analytics
 - Authentication and user management
+- Built with Next.js (frontend) and Flask (backend API with Firebase)
 
 ---
 
 ## Tech Stack
 
 - **Frontend:** Next.js (TypeScript, CSS)
-- **Backend API:** Flask (Python)
+- **Backend API:** Flask (Python, Firebase integration)
 - **Other:** JavaScript
 
 ---
 
 ## Getting Started
 
-To run FitPlate locally, you'll need to start both the Flask backend and the Next.js frontend.
+To run FitPlate locally, start both the Flask backend and the Next.js frontend.
 
 ### Prerequisites
 
@@ -48,10 +48,10 @@ cd FitPlate
 ### 2. Running the Flask Backend
 
 1. **Navigate to the backend directory**  
-   (Assuming your Flask API is in `backend/` or a similar folder. Adjust as needed.)
+   (The Flask API is in `app.py` at the root or in a backend folder. Adjust as needed.)
 
    ```bash
-   cd backend
+   cd backend   # If backend is a folder, otherwise stay at root
    ```
 
 2. **Create & activate a virtual environment (recommended)**
@@ -67,10 +67,25 @@ cd FitPlate
    pip install -r requirements.txt
    ```
 
-4. **Run the Flask server**
+4. **Configure environment variables**
+
+   Create a `.env` file in the backend directory with your Firebase and other secrets:
+
+   ```
+   FIREBASE_API_KEY=your_firebase_api_key
+   FIREBASE_AUTH_DOMAIN=your_firebase_auth_domain
+   FIREBASE_DATABASE_URL=your_firebase_database_url
+   FIREBASE_PROJECT_ID=your_firebase_project_id
+   FIREBASE_STORAGE_BUCKET=your_firebase_storage_bucket
+   FIREBASE_MESSAGING_SENDER_ID=your_firebase_messaging_sender_id
+   FIREBASE_APP_ID=your_firebase_app_id
+   # Add other secrets as needed
+   ```
+
+5. **Run the Flask server**
 
    ```bash
-   flask run
+   python app.py
    ```
 
    The API will usually run at `http://127.0.0.1:5000/`.
@@ -79,8 +94,7 @@ cd FitPlate
 
 ### 3. Running the Next.js Frontend
 
-1. **Navigate to the frontend directory**  
-   (Assuming your Next.js app is in `frontend/` or a similar folder. Adjust as needed.)
+1. **Navigate to the frontend directory**
 
    ```bash
    cd ../frontend
@@ -92,8 +106,9 @@ cd FitPlate
    npm install
    ```
 
-3. **Configure environment variables**  
-   Create a `.env.local` file and set the backend API URL:
+3. **Configure environment variables**
+
+   Create a `.env.local` file in the `frontend` directory and set the backend API URL:
 
    ```
    NEXT_PUBLIC_API_URL=http://127.0.0.1:5000
@@ -124,11 +139,11 @@ FitPlate/
 ├── backend/       # Flask (Python) API
 │   ├── app.py
 │   ├── requirements.txt
-│   └── ...
+│   └── .env
 ├── frontend/      # Next.js (TypeScript) frontend
 │   ├── package.json
 │   ├── pages/
-│   └── ...
+│   └── .env.local
 └── README.md
 ```
 
