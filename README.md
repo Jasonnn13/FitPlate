@@ -149,6 +149,13 @@ FitPlate/
 
 ---
 
+## More Details
+
+For detailed information and visuals about FitPlate, visit:  
+[FitPlate Project Canva](https://www.canva.com/design/DAG0WuZeQMY/4blB4lQ6Q_Jut034r8P2Pw/edit?utm_content=DAG0WuZeQMY&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton)
+
+---
+
 ## Contributing
 
 Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
